@@ -72,7 +72,7 @@ class ModelImageCollection(collections.Mapping):
             try:
                 self.loaded_fits[canonical_wavelength].close()
             except:
-                print "Failed to close model image files."
+                print("Failed to close model image files.")
 
 
     def __len__(self):
