@@ -7,10 +7,10 @@ _log = logging.getLogger('mcfost')
 
 # this lets you put "stop()" in your code to have a debugger breakpoint
 # Old versions of ipython didn't seems to have IPython.core.debugger
-try:
-  from IPython.core.debugger import Tracer; stop = Tracer()
-except ImportError:
-  pass
+# try:
+#   from IPython.core.debugger import Tracer; stop = Tracer()
+# except ImportError:
+#   pass
 
 # some extremely simple classes to serve as structs.
 
@@ -640,9 +640,9 @@ class Paramfile(object):
   1 Number of stars"""
         for star in self.stars:
             template+="""
-  {star[temp]:<7.1f} {star[radius]:5.1f} {star[mass]:5.1f} {star[x]:5.1f} {star[y]:5.1f} {star[z]:5.1f} {str_is_blackbody:1s}       Temp, radius (solar radius),M (solar mass),x,y,z (AU), is a blackbody?
+  {star[temp]:<7.1f} {star[radius]:5.3f} {star[mass]:5.3f} {star[x]:5.1f} {star[y]:5.1f} {star[z]:5.1f} {str_is_blackbody:1s}       Temp, radius (solar radius),M (solar mass),x,y,z (AU), is a blackbody?
   {star[spectrum]:s}
-  {star[fUV]:<5.1f}  {star[slope_fUV]:<5.1f}     fUV, slope_fUV """.format(star=recarray2dict(star), str_is_blackbody = 'T' if star['l_is_blackbody'] else 'F')
+  {star[fUV]:<5.3f}  {star[slope_fUV]:<5.3f}     fUV, slope_fUV """.format(star=recarray2dict(star), str_is_blackbody = 'T' if star['l_is_blackbody'] else 'F')
 
         # % starkeys(['temp', 'radius', 'mass', 'x', 'y', 'z', 'spectrum'])
         return template
