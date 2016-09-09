@@ -63,7 +63,13 @@ def run_one_file(filename, wavelengths=[], move_to_subdir=True, delete_previous=
         modeldir = os.path.splitext(os.path.dirname(filename))[0]
         #os.chdir(modeldir)
         #_log.info( "model directory"+modeldir)
+        if delete_previous and os.path.isdir(modelname):
+            _log.debug("Removing previous calculated sub-folders.")
+            import shutil
+            shutil.rmtree(modelname, ignore_errors=True)
+            
         os.mkdir(modelname)
+            
         subprocess.call('chmod -R g+w '+modelname,shell=True)
         subprocess.call('mv '+filename+' '+modelname,shell=True)
 
