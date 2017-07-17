@@ -1,5 +1,7 @@
 import os
 import numpy as np
+import matplotlib
+import matplotlib.pyplot as pl
 import logging
 import glob
 import sys
@@ -7,13 +9,14 @@ import astropy, astropy.io.ascii
 _PY2 = sys.version_info[0] == 2
 _log = logging.getLogger('mcfost')
 
-
 class Paramfile(object):
     """ Object class interface to MCFOST parameter files
 
+
     Example:
 
-    par = Paramfile('somefile.par')
+    par = Parfile('somefile.par')
+
 
     """
 
@@ -37,7 +40,6 @@ class Paramfile(object):
         self.filename= filename
         self._directory=directory
         self._readparfile(**kwargs)
-
 
     @property
     def wavelengths(self):
@@ -65,7 +67,6 @@ class Paramfile(object):
             if not os.path.exists(wavelengths_file):
                 raise IOError('Cannot find requested wavelength file: '+wavelengths_file)
             return astropy.io.ascii.read(wavelengths_file, data_start=0,names=['wavelength'])['wavelength']
-
 
     def __getitem__(self, key):
         # enable dict-like access as well, for convenience
@@ -101,10 +102,26 @@ class Paramfile(object):
 
 
         text = open(self.filename,'r').readlines()
-        lineptr = 3
+        lineptr = 1
 
         #--- First we define a variety of utility functions to be used below --
         # utility functions for pulling out specific items from a line
+
+#        def set1part(key,linenum, partnum, typ):
+#            """Parse out one item and set it as an attribute on this object. """
+#            if verbose: _log.info( "Looking for {key} on line {linenum} item {partnum} in '{text}'".format(key=key,linenum=linenum, partnum=partnum, type=typ, text=text[linenum].rstrip()))
+#            try:
+#                if typ == bool:
+#                    # Python doesn't automatically cast T and F to True and False so implement
+#                    # that manually here.
+#                    val = str(text[linenum].split(None,partnum+1)[partnum-1])
+#                    self.__dict__[key] = val == 'T'
+#                else:
+#                    self.__dict__[key] = typ(text[linenum].split(None,partnum+1)[partnum-1])
+#                if verbose: _log.info("    found: {0} = {1}".format(key, self.__dict__[key]))
+#            except:
+#                raise IOError("Could not parse line %d:'%s' item %d for '%s'" % (linenum, text[linenum][:-1], partnum, key))
+#
         def set1partOfDict(some_dict, key,linenum, partnum, typ):
             """ Parse out one item from the text file, cast its type, and
             save it into a dict"""
@@ -122,7 +139,6 @@ class Paramfile(object):
                 if verbose: _log.info("    found: {0} = {1}".format(key, some_dict[key]))
             except:
                 raise IOError("Could not parse line %d:'%s' item %d for '%s'" % (linenum, text[linenum][:-1], partnum, key))
-
         def set1part(key,linenum, partnum, typ):
             """ Same as above but a shorthand for using this own object's __dict__"""
             return set1partOfDict(self.__dict__, key, linenum, partnum, typ)
@@ -163,6 +179,7 @@ class Paramfile(object):
         if self.version < self._minimum_version: raise Exception('Parameter file version must be at least {ver:.2f}'.format(ver=self._minimum_version))
 
         #-- Number of photon packages --
+        lineptr = 3
         if (float(self.version) < 2.15):
             set1part( 'nbr_parallel_loop', lineptr, 1, int) ; lineptr+=1
         else:
@@ -181,7 +198,30 @@ class Paramfile(object):
         set1part('l_sed_complete', lineptr, 3, bool) ; lineptr+=1
         set1part('wavelengths_file', lineptr, 1, str) ; lineptr+=1
         set1part('l_separate', lineptr, 1, bool)
-        set1part('l_stokes', lineptr, 2, bool)  ; lineptr+=1
+        set1part('l_stokes', lineptr, 2, bool)  ; lineptr+=3
+
+        # compute or look up wavelength solution
+        if self.l_complete:
+            # use log sampled wavelength range
+            wavelengths_inc=np.exp( np.log(self.lambda_max/self.lambda_min)/(self.nwavelengths) )
+            self.wavelengths = self.lambda_min * wavelengths_inc**(np.arange(self.nwavelengths)+0.5)
+        else:
+            # load user-specified wavelength range from file on disk
+            possible_wavelengths_files = [
+                os.path.join(self._directory, self.wavelengths_file),
+                os.path.join(self._directory,"data_th",self.wavelengths_file),
+                #os.path.join(os.getenv('MY_MCFOST_UTILS'),'Lambda',self.wavelengths_file) ,
+                os.path.join(os.getenv('MCFOST_UTILS'),'Lambda',self.wavelengths_file) ]
+            wavelengths_file = None
+            for possible_name in possible_wavelengths_files:
+                _log.debug("Checking for wavelengths file at "+possible_name)
+                if os.path.exists(possible_name):
+                    wavelengths_file=possible_name
+                    _log.debug("Found wavelengths file at "+wavelengths_file)
+                    break
+            if not os.path.exists(wavelengths_file):
+                raise IOError('Cannot find requested wavelength file: '+wavelengths_file)
+            self.wavelengths = astropy.io.ascii.read(wavelengths_file, data_start=0,names=['wavelength'])['wavelength']
 
         #-- Grid geometry and size --
         lineptr = skip_blank_and_comment_lines(lineptr)
@@ -206,10 +246,6 @@ class Paramfile(object):
         set1part('RT_imax', lineptr, 2, float)
         set1part('RT_n_incl',lineptr , 3, int)
         set1part('RT_centered',lineptr , 4, bool) ; lineptr+=1
-        if float(self.version) >= 2.20:
-            set1part('RT_az_min', lineptr, 1, float)
-            set1part('RT_az_max', lineptr, 2, float)
-            set1part('RT_n_az',lineptr , 3, int) ; lineptr+=1
         set1part('distance', lineptr, 1, float) ; lineptr+=1
         if float(self.version) > 2.09:
             set1part('disk_pa', lineptr, 1, float) ; lineptr+=1  # only for > v2.09
@@ -248,8 +284,7 @@ class Paramfile(object):
         #-- Scattering Method --
         lineptr = skip_blank_and_comment_lines(lineptr)
         set1part('scattering_method', lineptr, 1, int) ; lineptr+=1
-        set1part('scattering_mie_hg', lineptr, 1, int) ; lineptr+=1
-
+        set1part('scattering_mie_hg', lineptr, 1, int) ; lineptr+=3
         #-- Symmetries --
         lineptr = skip_blank_and_comment_lines(lineptr)
         set1part('l_image_symmetry', lineptr, 1, bool) ; lineptr+=1
@@ -285,6 +320,22 @@ class Paramfile(object):
         # read in the different zones
         lineptr = skip_blank_and_comment_lines(lineptr)
         set1part( 'nzones' ,lineptr, 1,int) ; lineptr+=1
+
+
+#        if float(self.version) >=2.15:
+#            set1part( 'im_size_au', 22+d2, 3, float),
+#            if float(self.version) < 2.19:
+#                set1part( 'im_zoom', 22+d2, 4, float)
+#            else:
+#                self.__dict__['im_zoom'] = 1.0
+#            i=39  # points to nzones parameter # note: advance this counter ** after** you have read something in...
+#        else:
+#            set1part( 'gas_to_dust', 38+d2, 1, float),
+#            set1part( 't_start' ,42+d3, 1,float),
+#            set1part( 'sublimtemp' ,42+d3, 2,float),
+#            i=43  # points to nzones parameter # note: advance this counter ** after** you have read something in...
+#
+
 
         #-- Density Structure (1 per zone) --
         self.density_zones=[]
@@ -333,7 +384,6 @@ class Paramfile(object):
             set1part('cavity_ref_radius', lineptr, 2, float) ; lineptr+=1
             set1part('cavity_flaring_exp', lineptr, 1, float) ; lineptr+=3
 
-
         #-- Grain properties --
         # read in the dust grain properties. One set of dust props **per zone**, each of which can contain multiple species
         # These are each stored as a list of dicts per each zone.
@@ -356,17 +406,14 @@ class Paramfile(object):
                     set1partOfDict(dust, 'porosity',     lineptr, 4 if self.version >=2.17 else 3, float),
                     set1partOfDict(dust, 'mass_fraction',lineptr, 5 if self.version >=2.17 else 4, float)
                     lineptr+=1
-                    components=[]
+                    if dust['ncomponents'] >1: raise NotImplementedError("Need multi-component parsing code!")
                     for icomponent in range(dust['ncomponents']):
-                        this_component={}
                         dust_keys = (('filename', lineptr, 1, str),
                             ('volume_fraction', lineptr, 2, float))
                         for key, line, item, typ in dust_keys:
-                            set1partOfDict(this_component,key, line, item, typ)
-                        components.append(this_component)
+                            set1partOfDict(dust,key, line, item, typ)
+
                         lineptr+=1
-                    dust['components']=components
-                        
                     # now the heating and grain size properties
                     dust_keys = ( ('heating', lineptr+0, 1, int),
                             ('amin', lineptr+1, 1, float),
@@ -376,28 +423,6 @@ class Paramfile(object):
                     for key, line, item, typ in dust_keys:
                         set1partOfDict(dust,key, line, item, typ)
                     lineptr+=2
-                    
-
-                else:
-                    # earlier versions than 2.12, so only one component allowed.
-                    dust_keys = [('filename', i+0, 1, str),
-                            ('porosity', i+0, 2, float),
-                            ('mass_fraction', i+0, 3, float),
-                            ('heating', i+1, 1, int),
-                            ('amin', i+2, 1, float),
-                            ('amax', i+2, 2, float),
-                            ('aexp', i+2, 3, float),
-                            ('n_grains', i+2, 4, int)]
-                    for key, line, item, typ in dust_keys:
-                        set1partOfDict(dust,key, line, item, typ)
-                    i+=3
-                #add any missing keywords using defaults. This is to handle
-                # parsing earlier versions of the parameter file that lacked some settings
-                #defaults = (('volume_fraction',1), ('grain_type', 'Mie'))
-                #for defkey, defval in defaults:
-                    #if defkey not in dust.keys() : dust[defkey] = defval
-
-                self.density_zones[idensity]['dust'].append(dust)
 
         # molecular RT settings
         lineptr = skip_blank_and_comment_lines(lineptr)
@@ -458,7 +483,7 @@ class Paramfile(object):
                 elif  options[j] == "-rt":
                     self.im_raytraced = True
         else:
-            if verbose: print("could not read in command line options from MCFOST; using default grid settings")
+            if verbose: print "could not read in command line options from MCFOST; using default grid settings"
 
         #--- Derived quantities ---
 
@@ -497,7 +522,7 @@ class Paramfile(object):
         return self.density_zones[0]['dust'][0]
 
     def __str__(self):
-        """ Return a nicely formatted text parameter file. Currently returns v2.20 format
+        """ Return a nicely formatted text parameter file. Currently returns v2.17 format
 
         HISTORY
         --------
@@ -554,7 +579,6 @@ class Paramfile(object):
 #Maps
   {self.im_nx:<3d} {self.im_ny:3d} {self.im_map_size:5.1f}        grid (nx,ny), size [AU]
   {self.RT_imin:<4.1f}  {self.RT_imax:<4.1f}  {self.RT_n_incl:>2d} {str_RT_centered}    RT: imin, imax, n_incl, centered ?
-  {self.RT_az_min:<4.1f}  {self.RT_az_max:<4.1f}  {self.RT_n_az:>2d}    RT: az_min, az_max, n_az
   {self.distance:<6.2f}                 distance (pc)
   {self.disk_pa:<6.2f}                  disk PA
   """.format(self=self,
@@ -598,20 +622,19 @@ class Paramfile(object):
           str_viscous_heating=bstr(self.l_viscous_heating),
           )
 
-        # if self.nzones > 1:
-        #     raise NotImplementedError("write par file code does not yet support multiple zones!")
+        if self.nzones > 1:
+            raise NotImplemented("write par file code does not yet support multiple zones!")
 
-        #getsubkeys = lambda k, l: tuple([par[k][li] for li in l])
-        template += "\n#Density structure"
-        for zone in range(self.nzones): 
-            template+="""
+        getsubkeys = lambda k, l: tuple([par[k][li] for li in l])
+        template+="""
+#Density structure
   {zone[zone_type]:1d}                       zone type : 1 = disk, 2 = tapered-edge disk, 3 = envelope, 4 = debris disk, 5 = wall
   {zone[dust_mass]:<10.2e} {zone[gas_to_dust_ratio]:<5.1f}        dust mass,  gas-to-dust mass ratio
   {zone[scale_height]:<5.1f}  {zone[reference_radius]:<6.1f} {zone[debris_disk_vertical_profile_exponent]:<6.1f}          scale height, reference radius (AU), unused for envelope, vertical profile exponent (only for debris disk)
   {zone[r_in]:<6.1f}  {zone[edge]:<6.1f} {zone[r_out]:<6.1f} {zone[r_critical]:<6.1f}  Rin, edge, Rout, Rc (AU) Rc is only used for tappered-edge & debris disks (Rout set to 8*Rc if Rout==0)
   {zone[flaring_exp]:<8.3f}                  flaring exponent, unused for envelope
   {zone[surface_density_exp]:<6.3f} {zone[gamma_exp]:<6.3f}                surface density exponent (or -gamma for tappered-edge disk or volume density for envelope), usually < 0, -gamma_exp (or alpha_in & alpha_out for debris disk)
-        """.format(zone = self.density_zones[zone])
+        """.format(zone = self.density_zones[0])
 
         if float(self.version) < 3.0:
            template+="""
@@ -623,21 +646,15 @@ class Paramfile(object):
 
         if len(self.density_zones[0]['dust']) > 1: raise NotImplemented("No support for multi dust types yet")
         template+="""
-#Grain properties"""
- 
+#Grain properties
+  {zone[dust_nspecies]:<2d}                      Number of species""".format(zone=self.density_zones[0])
 
-        for zone in range(self.nzones): 
-            template+="""
-  {zone[dust_nspecies]:<2d}                      Number of species""".format(zone=self.density_zones[zone])
-            template+="""
+        template+="""
   Mie {dust[ncomponents]:<2d} {dust[mixing_rule]:<1d} {dust[porosity]:<5.2f} {dust[mass_fraction]:<5.2f} 0.9     Grain type (Mie or DHS), N_components, mixing rule (1 = EMT or 2 = coating),  porosity, mass fraction, Vmax (for DHS)
-  """.format(dust = self.density_zones[zone]['dust'][0])
-            for component in self.density_zones[zone]['dust'][0]['components']:
-                template+="""{component[filename]:s}  {component[volume_fraction]:<4.1f}   Optical indices file, volume fraction
-  """.format(component=component)
-            template+="""{dust[heating]:<2d}                      Heating method : 1 = RE + LTE, 2 = RE + NLTE, 3 = NRE
-  {dust[amin]:<6.3f} {dust[amax]:6.1f}  {dust[aexp]:4.3f} {dust[ngrains]:3d}   amin, amax, aexp, nbr_grains
-      """.format(dust = self.density_zones[zone]['dust'][0])
+  {dust[filename]:s}  {dust[volume_fraction]:<4.1f}   Optical indices file, volume fraction
+  {dust[heating]:<2d}                      Heating method : 1 = RE + LTE, 2 = RE + NLTE, 3 = NRE
+  {dust[amin]:<6.3f} {dust[amax]:6.1f}  {dust[aexp]:4.1f} {dust[ngrains]:3d}   amin, amax, aexp, nbr_grains
+      """.format(dust = self.density_zones[0]['dust'][0])
 
         template+="""
 #Molecular RT settings
@@ -656,7 +673,6 @@ class Paramfile(object):
               str_molab = bstr(self.l_molecular_abundance),
               str_molray=bstr(self.l_molecular_raytrace))
 
-
         template+="""
 #Star properties
   1 Number of stars"""
@@ -665,13 +681,13 @@ class Paramfile(object):
   {star[temp]:<7.1f} {star[radius]:5.3f} {star[mass]:5.3f} {star[x]:5.1f} {star[y]:5.1f} {star[z]:5.1f} {str_is_blackbody:1s}       Temp, radius (solar radius),M (solar mass),x,y,z (AU), is a blackbody?
   {star[spectrum]:s}
   {star[fUV]:<5.3f}  {star[slope_fUV]:<5.3f}     fUV, slope_fUV """.format(star=recarray2dict(star), str_is_blackbody = 'T' if star['l_is_blackbody'] else 'F')
-
         # % starkeys(['temp', 'radius', 'mass', 'x', 'y', 'z', 'spectrum'])
         return template
 
 
     def writeto(self, outname='sample.par'):
-        """ Write an MCFOST parameter file to disk. Currently outputs v2.20 param files
+        """ Write an MCFOST parameter file to disk. Currently outputs v2.17 param files
+
 
         WARNING: Not all parameters are allowed to vary, just the most useful ones.
         Lots of the basics are still hard coded.
@@ -680,7 +696,7 @@ class Paramfile(object):
 
         Parameters
         ----------
-         outname : string
+        outname : string
             Output file name
 
         """
@@ -689,8 +705,7 @@ class Paramfile(object):
         outfile = open(outname, 'w')
         outfile.write( str(self))
         outfile.close()
-        print("  ==>> "+outname)
-
+        print "  ==>> "+outname
 
     def set_parameter(self, paramname, value):
         """ Helper function for parameter setting.
@@ -705,7 +720,7 @@ class Paramfile(object):
         IDL MCRE re_translationtable.txt configuration file.
 
         """
-        
+
         if paramname == 'm_star':
             self.star['mass'] = value
         elif paramname == 't_star':
@@ -752,8 +767,7 @@ class Paramfile(object):
             except:
                 raise ValueError("Don't know how to set a parameter named '{0}'".format(paramname))
 
-
-def find_paramfile(directory="./",  is_data_dir=True, parfile=None, verbose=False, wavelength=None):
+def find_paramfile(directory="./",  parfile=None, verbose=False, wavelength=None):
     """ Find a MCFOST par file in a specified directory
 
     By default, look in the current directory of a model,
@@ -771,9 +785,6 @@ def find_paramfile(directory="./",  is_data_dir=True, parfile=None, verbose=Fals
 
     """
 
-    # We check if we are in a data directory or not
-    is_data_dir = (directory.split('_')[0] == "data")
-
     if parfile is not None:
         # TODO validate its existence, check if path name relative to dir?
         output = parfile
@@ -783,12 +794,13 @@ def find_paramfile(directory="./",  is_data_dir=True, parfile=None, verbose=Fals
         if wavelength is not None:
             directory = os.path.join(directory, "data_%s" % wavelength)
             _log.info("Since wavelength is %s, looking in %s subdir" % (wavelength,dir))
-        l = glob.glob(os.path.join(directory, "*.par*"))
+        l = glob.glob(os.path.join(directory, "*.par"))
+        l+= glob.glob(os.path.join(directory, "*.para"))
         if len(l) == 1:
             output = l[0]
         elif len(l) > 1:
-            _log.error("Multiple par files found...")
-            output = None
+            _log.warning("Multiple par files found... returning first: "+l[0])
+            output = l[0]
         else:
             _log.error("No par files found!")
             output = None
