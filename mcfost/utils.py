@@ -2,6 +2,106 @@
 import matplotlib
 import numpy as np
 import logging
+#import image_registration
+#import astropy.io.fits as fits
+import scipy.interpolate
+#import astropy.units as units
+
+
+
+def generate_image_covariance_matrix(observations, autocorrelation, matern=False, analytical=True, wavelength=None):
+
+    # Get Observed Data
+    im = observations.images
+    mask = im[wavelength].mask
+    image = im[wavelength].image
+    noise = im[wavelength].uncertainty
+    
+    # Generate x and y position matrices for the covariance matrix
+    xij = np.zeros(image.shape)
+    yij = np.zeros(image.shape)
+    for ind in np.arange(image.shape[0]):
+        yij[:,ind] = np.arange(image.shape[0])
+        xij[ind,:] = np.arange(image.shape[1])
+
+    # Convert all relevant arrays to 1D matrix
+    matrix_obs = image[mask != 0]
+    matrix_noise = noise[mask != 0]
+    xij_matrix = xij[mask != 0]
+    yij_matrix = yij[mask != 0]
+
+    # Set some parameters needed for the Matern Kernel
+    l = 5.0
+    ro = 5.0*l
+    b = 1.0
+    ag = 1.0
+
+
+    # Covariance Matrix has the functional form:
+    # C_ij = b * \delta_ij noise^2_i + K_ij(phi_G)
+    # Construct  K_ij:
+    nx = mask[mask != 0].shape[0]
+    ny = nx
+    xx = np.arange(nx)
+    yy = np.arange(ny)
+    rij = np.zeros((nx,ny))
+    wij = np.zeros((nx,ny))
+    sigma_diag = np.zeros((nx,ny))
+    global_covariance = np.zeros((nx,ny))
+    #rij = sqrt((xi-xj)**2+(yi-yj)**2)
+    #cij = sigmai sigmaj wij (1+(np.sqrt(3)*rij/l))*np.exp(-np.sqrt(3)*rij/l) 
+    interpolator = scipy.interpolate.interp1d(np.arange(autocorrelation.shape[0]), autocorrelation, kind='linear', copy=False)
+
+
+    for i in xx: 
+        for j in yy:
+            if i == j:
+                sigma_diag[j,i] = b*matrix_noise[i]*matrix_noise[i]
+            rij[j,i] = np.sqrt((xij_matrix[i]-xij_matrix[j])**2.0+(yij_matrix[i]-yij_matrix[j])**2.0)
+            if rij[j,i] <= ro:
+                wij[j,i] = 0.5+0.5*np.cos(np.pi*rij[j,i]/ro)
+            else:
+                wij[j,i] = 0.0
+            global_covariance[j,i]=wij[j,i]*interpolator(rij[j,i])    
+            
+
+    K_global =  ag * (1+(np.sqrt(3)*rij/l))*np.exp(-np.sqrt(3)*rij/l)*wij
+    
+    if matern:
+        covariance = sigma_diag + K_global
+    if analytical:
+        covariance = sigma_diag + global_covariance
+
+    return covariance
+
+def generate_sed_covariance_matrix(observations):
+
+    # Get the sed and uncertainties
+    obs_wavelengths = observations.sed.wavelength
+    obs_nufnu = observations.sed.nu_fnu
+    obs_nufnu_uncert = observations.sed.nu_fnu_uncert
+    noise = obs_nufnu_uncert.value
+
+
+    # Covariance Matrix has the functional form:
+    # C_ij = b * \delta_ij noise^2_i + K_ij(phi_G)
+    # Construct  K_ij:
+    nx = noise.shape[0]
+    ny = nx
+    xx = np.arange(nx)
+    yy = np.arange(ny)
+    sigma_diag = np.zeros((nx,ny))
+    b = 1.0
+
+    for k in xx: 
+        for j in yy:
+            if k == j:
+                sigma_diag[j,k] = b*noise[k]*noise[k]
+               
+    covariance = sigma_diag
+
+    return covariance
+
 
 def imshow_with_mouseover(ax, *args, **kwargs):
     """ Wrapper for pyplot.imshow that sets up a custom mouseover display formatter
