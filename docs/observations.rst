@@ -60,7 +60,9 @@ Lines starting with '#' are interpreted as comments. This file is created manual
     <etc.>
 
 
-To specify a point with an upper limit only, set the Flux column to zero, and the Uncertainy to the 1 sigma upper limit value, as in the last line of the above example. 
+To specify a point with an upper limit only, set the Flux column to zero, and the Uncertainy to the 1 sigma upper limit value, as in the last line of the above example.
+
+The ``sed_from_vizier`` function will generate an SED txt file of this form from vizier catalogues when supplied with an object name (object name must be resolvable by simbad).
 
 Images
 ^^^^^^^^
