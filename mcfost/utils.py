@@ -330,7 +330,7 @@ def sed_from_vizier(vizier_fn,from_file=False,radius=2.0,refine=False, variable=
         sed_freq = table['sed_freq'].quantity.value
         sed_flux = table['sed_flux'].quantity.value
         sed_eflux = table['sed_eflux'].quantity.value
-        sz = fluxes.shape[0]
+        sz = sed_flux.shape[0]
         filters = []
         for i in np.arange(sz):
             filters.append(table['sed_filter'][i])
