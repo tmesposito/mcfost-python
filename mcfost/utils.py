@@ -247,3 +247,151 @@ def ccm_extinction(Rv, lambda_ang):
     A_lambda = np.asarray((a+b)/Rv)
 
     return A_lambda
+
+
+def sed_from_vizier(vizier_fn,from_file=False,radius=2.0,refine=False, variable=0.0):
+
+    """
+    Generate spectral energy distribution file in the format expected 
+    for an observed SED from a Vizier generated SED file. Output file
+    includes wavelength in microns, flux in janskys, uncertainty in 
+    janskys, and a string giving the source of the photometry.
+    
+    Parameters
+    ----------
+    vizier_fn: string
+        name of object
+        alternatively, if from_file is true, this is the
+            filename of the votable.
+    radius: float
+        position matching in arseconds.
+    from_file: boolean
+        set to True if using previously generated votable
+    refine: boolean
+        Set to True to get rid of duplicates, assign missing 
+        uncertainties, sorting 
+    variable: float
+        Minimum percentage value allowed for uncertainty
+        e.g. 0.1 would require 10% uncertainties on all measurements.
+     
+    Returns
+    -------
+    table: astropy.Table
+        VO table returned by the Vizier service.
+         
+    """
+
+    from astroquery.vizier import Vizier
+    import astropy.units as u
+    from StringIO import StringIO as BytesIO
+    from httplib import HTTPConnection
+ 
+    from astropy.table import Table
+    
+    from astropy.coordinates import SkyCoord
+    import numpy as np
+    
+    if from_file:
+        from astropy.io.votable import parse_single_table
+        table = parse_single_table(vizier_fn)
+
+
+        sed_freq = table.array['sed_freq']# frequency in Ghz
+        sed_flux = table.array['sed_flux']# flux in Jy
+        sed_eflux = table.array['sed_eflux']# flux error in Jy
+        sed_filter = table.array['sed_filter']# filter for photometry
+    else:
+    
+        try:
+            coords = SkyCoord.from_name(vizier_fn)
+        except:
+            print 'Object name was not resolved by Simbad. Play again.'
+            return False
+        pos = np.fromstring(coords.to_string(), dtype=float, sep=' ')  
+        ra, dec = pos
+        target = "{0:f},{1:f}".format(ra, dec)
+
+        # Queue Vizier directly without having to use the web interface
+        # Specify the columns:
+        #v = Vizier(columns=['_RAJ2000', '_DEJ2000','_sed_freq', '_sed_flux', '_sed_eflux','_sed_filter'])
+        #result = v.query_region(vizier_fn, radius=2.0*u.arcsec)
+        #print result
+
+        url = "http:///viz-bin/sed?-c={target:s}&-c.rs={radius:f}"
+        host = "vizier.u-strasbg.fr"
+        port = 80
+        path = "/viz-bin/sed?-c={target:s}&-c.rs={radius:f}".format(target=target, radius=radius)
+        connection = HTTPConnection(host, port)
+        connection.request("GET", path)
+        response = connection.getresponse()
+
+        table = Table.read(BytesIO(response.read()), format="votable")
+
+        sed_freq = table['sed_freq'].quantity.value
+        sed_flux = table['sed_flux'].quantity.value
+        sed_eflux = table['sed_eflux'].quantity.value
+        sz = sed_flux.shape[0]
+        filters = []
+        for i in np.arange(sz):
+            filters.append(table['sed_filter'][i])
+        sed_filter = np.asarray(filters)
+
+    
+
+    wavelength = 2.99e14/(sed_freq*1.0e9)# wavelength in microns
+    flux = sed_flux # flux in Jy
+    uncertainty = sed_eflux # uncertainty in Jy
+    source = sed_filter # string of source of photometry
+    
+    sz = np.shape(wavelength)[0]
+
+    
+    if refine:
+        
+        # if uncertainty values don't exist, generate
+        # new uncertainty for 3*flux.
+        for j in np.arange(sz):
+            if np.isnan(uncertainty[j]):
+                uncertainty[j] = flux[j]*3
+                
+        # Remove duplicate entries based on filter names.
+        # Choose entry with smallest error bar for duplicates.
+        filter_set = list(set(source))
+        wls = []
+        jys = []
+        ejys = []
+        for filt in filter_set:
+            inds = np.where(source == filt)
+            filt_eflux = uncertainty[inds]
+            picinds = np.where(filt_eflux == np.min(filt_eflux))
+            wls.append(wavelength[inds][picinds][0])
+            jys.append(flux[inds][picinds][0])
+            ejys.append(uncertainty[inds][picinds][0])
+
+        # Sort by increasing wavelength
+        sortind = np.argsort(np.asarray(wls))
+        wavelength = np.asarray(wls)[sortind]
+        flux = np.asarray(jys)[sortind]
+        uncertainty = np.asarray(ejys)[sortind]
+        source = np.asarray(filter_set)[sortind]
+        
+        sz = np.shape(wavelength)[0]
+     
+    
+    # Update uncertainties for value of variable
+    for j in np.arange(sz):
+        if uncertainty[j] < flux[j]*variable:
+            uncertainty[j] = flux[j]*variable
+
+            
+    txtfn = 'observed_sed'+vizier_fn.replace(" ", "")+'.txt'
+    f = open(txtfn,'w')
+    f.write('#  Wavelength (microns)'+"\t"+'Flux (Jy)'+"\t"+'Uncertainty (Jy)'+"\t"+'Source'+"\n")
+
+    for j in np.arange(sz):
+
+        f.write(str(wavelength[j])+"\t"+str(flux[j])+"\t"+str(uncertainty[j])+"\t"+str(source[j])+"\n")
+
+    f.close()
+        
+    return table
