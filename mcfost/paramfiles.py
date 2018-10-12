@@ -12,11 +12,9 @@ _log = logging.getLogger('mcfost')
 class Paramfile(object):
     """ Object class interface to MCFOST parameter files
 
-
     Example:
 
-    par = Parfile('somefile.par')
-
+    par = Paramfile('somefile.para')
 
     """
 
@@ -102,7 +100,6 @@ class Paramfile(object):
 
 
         text = open(self.filename,'r').readlines()
-        lineptr = 1
 
         #--- First we define a variety of utility functions to be used below --
         # utility functions for pulling out specific items from a line
@@ -121,7 +118,7 @@ class Paramfile(object):
 #                if verbose: _log.info("    found: {0} = {1}".format(key, self.__dict__[key]))
 #            except:
 #                raise IOError("Could not parse line %d:'%s' item %d for '%s'" % (linenum, text[linenum][:-1], partnum, key))
-#
+
         def set1partOfDict(some_dict, key,linenum, partnum, typ):
             """ Parse out one item from the text file, cast its type, and
             save it into a dict"""
@@ -139,6 +136,7 @@ class Paramfile(object):
                 if verbose: _log.info("    found: {0} = {1}".format(key, some_dict[key]))
             except:
                 raise IOError("Could not parse line %d:'%s' item %d for '%s'" % (linenum, text[linenum][:-1], partnum, key))
+
         def set1part(key,linenum, partnum, typ):
             """ Same as above but a shorthand for using this own object's __dict__"""
             return set1partOfDict(self.__dict__, key, linenum, partnum, typ)
@@ -148,7 +146,7 @@ class Paramfile(object):
             dt = []
             vals = []
             for item in somedict.items():
-                deftype =  type(item[1])
+                deftype = type(item[1])
                 # force longer string field because the default behavior chops it to 1 character?!?
                 # note we need to be more careful about S vs U if on Python 3
                 if deftype == str:
@@ -158,7 +156,6 @@ class Paramfile(object):
                 vals.append(item[1])
             mydtype = np.dtype(dt)
             return np.rec.array(tuple(vals),  dtype=mydtype)
-
 
         def skip_blank_and_comment_lines(lineptr):
             """ Skip past one or more blank lines and section
@@ -200,28 +197,6 @@ class Paramfile(object):
         set1part('l_separate', lineptr, 1, bool)
         set1part('l_stokes', lineptr, 2, bool)  ; lineptr+=3
 
-        # compute or look up wavelength solution
-        if self.l_complete:
-            # use log sampled wavelength range
-            wavelengths_inc=np.exp( np.log(self.lambda_max/self.lambda_min)/(self.nwavelengths) )
-            self.wavelengths = self.lambda_min * wavelengths_inc**(np.arange(self.nwavelengths)+0.5)
-        else:
-            # load user-specified wavelength range from file on disk
-            possible_wavelengths_files = [
-                os.path.join(self._directory, self.wavelengths_file),
-                os.path.join(self._directory,"data_th",self.wavelengths_file),
-                #os.path.join(os.getenv('MY_MCFOST_UTILS'),'Lambda',self.wavelengths_file) ,
-                os.path.join(os.getenv('MCFOST_UTILS'),'Lambda',self.wavelengths_file) ]
-            wavelengths_file = None
-            for possible_name in possible_wavelengths_files:
-                _log.debug("Checking for wavelengths file at "+possible_name)
-                if os.path.exists(possible_name):
-                    wavelengths_file=possible_name
-                    _log.debug("Found wavelengths file at "+wavelengths_file)
-                    break
-            if not os.path.exists(wavelengths_file):
-                raise IOError('Cannot find requested wavelength file: '+wavelengths_file)
-            self.wavelengths = astropy.io.ascii.read(wavelengths_file, data_start=0,names=['wavelength'])['wavelength']
 
         #-- Grid geometry and size --
         lineptr = skip_blank_and_comment_lines(lineptr)
@@ -246,6 +221,10 @@ class Paramfile(object):
         set1part('RT_imax', lineptr, 2, float)
         set1part('RT_n_incl',lineptr , 3, int)
         set1part('RT_centered',lineptr , 4, bool) ; lineptr+=1
+        if float(self.version) >= 2.20:
+            set1part('RT_az_min', lineptr, 1, float)
+            set1part('RT_az_max', lineptr, 2, float)
+            set1part('RT_n_az',lineptr , 3, int) ; lineptr+=1
         set1part('distance', lineptr, 1, float) ; lineptr+=1
         if float(self.version) > 2.09:
             set1part('disk_pa', lineptr, 1, float) ; lineptr+=1  # only for > v2.09
@@ -253,7 +232,6 @@ class Paramfile(object):
             self.disk_pa = 0
         lineptr+=2
 
-        lineptr = skip_blank_and_comment_lines(lineptr)
 
         # compute inclinations used for SED
         # FIXME this needs updating for SED RT mode
@@ -285,12 +263,12 @@ class Paramfile(object):
         lineptr = skip_blank_and_comment_lines(lineptr)
         set1part('scattering_method', lineptr, 1, int) ; lineptr+=1
         set1part('scattering_mie_hg', lineptr, 1, int) ; lineptr+=3
+
         #-- Symmetries --
         lineptr = skip_blank_and_comment_lines(lineptr)
         set1part('l_image_symmetry', lineptr, 1, bool) ; lineptr+=1
         set1part('l_central_symmetry', lineptr, 1, bool) ; lineptr+=1
         set1part('l_axial_symmetry', lineptr, 1, bool) ; lineptr+=1
-        lineptr = skip_blank_and_comment_lines(lineptr)
 
         #-- Disk physics / dust global properties --
         lineptr = skip_blank_and_comment_lines(lineptr)
@@ -319,7 +297,7 @@ class Paramfile(object):
         #-- Number of Zones --
         # read in the different zones
         lineptr = skip_blank_and_comment_lines(lineptr)
-        set1part( 'nzones' ,lineptr, 1,int) ; lineptr+=1
+        set1part( 'nzones' ,lineptr, 1,int) ; lineptr+=3
 
 
 #        if float(self.version) >=2.15:
@@ -334,13 +312,11 @@ class Paramfile(object):
 #            set1part( 't_start' ,42+d3, 1,float),
 #            set1part( 'sublimtemp' ,42+d3, 2,float),
 #            i=43  # points to nzones parameter # note: advance this counter ** after** you have read something in...
-#
 
 
         #-- Density Structure (1 per zone) --
         self.density_zones=[]
         for idensity in range(self.nzones):
-            lineptr = skip_blank_and_comment_lines(lineptr)
             density={}
             set1partOfDict(density, 'zone_type', lineptr, 1, int) ; lineptr+=1
             set1partOfDict(density, 'dust_mass', lineptr, 1, float)
@@ -376,9 +352,9 @@ class Paramfile(object):
 
             self.density_zones.append(density)
 
+        #-- Cavity --
         if float(self.version) < 3.0:
             lineptr = skip_blank_and_comment_lines(lineptr)
-            #-- Cavity --
             set1part('cavity_flag', lineptr, 1, str) ; lineptr+=1
             set1part('cavity_height', lineptr, 1, float)
             set1part('cavity_ref_radius', lineptr, 2, float) ; lineptr+=1
@@ -399,21 +375,27 @@ class Paramfile(object):
                 if float(self.version) >= 2.12:
                     # version 2.12 or higher, allow for multi-component grains
                     if self.version >= 2.17:
-                        set1partOfDict(dust,'grain_type', lineptr, 1, str)
+                        # version 2.17 or higher, allow for DHS grain type
+                        set1partOfDict(dust, 'grain_type', lineptr, 1, str)
+                        set1partOfDict(dust, 'dust_vmax',   lineptr, 6, float)
 
                     set1partOfDict(dust, 'ncomponents',  lineptr, 2 if self.version >=2.17 else 1, int),
                     set1partOfDict(dust, 'mixing_rule',  lineptr, 3 if self.version >=2.17 else 2, int),
                     set1partOfDict(dust, 'porosity',     lineptr, 4 if self.version >=2.17 else 3, float),
                     set1partOfDict(dust, 'mass_fraction',lineptr, 5 if self.version >=2.17 else 4, float)
                     lineptr+=1
-                    if dust['ncomponents'] >1: raise NotImplementedError("Need multi-component parsing code!")
+                    #if dust['ncomponents'] >1: raise NotImplementedError("Need multi-component parsing code!")
+                    components=[]
                     for icomponent in range(dust['ncomponents']):
+                        this_component={}
                         dust_keys = (('filename', lineptr, 1, str),
                             ('volume_fraction', lineptr, 2, float))
                         for key, line, item, typ in dust_keys:
-                            set1partOfDict(dust,key, line, item, typ)
-
+                            set1partOfDict(this_component,key, line, item, typ)
+                        components.append(this_component)
                         lineptr+=1
+                    dust['components']=components
+
                     # now the heating and grain size properties
                     dust_keys = ( ('heating', lineptr+0, 1, int),
                             ('amin', lineptr+1, 1, float),
@@ -423,6 +405,8 @@ class Paramfile(object):
                     for key, line, item, typ in dust_keys:
                         set1partOfDict(dust,key, line, item, typ)
                     lineptr+=2
+
+                self.density_zones[idensity]['dust'].append(dust)
 
         # molecular RT settings
         lineptr = skip_blank_and_comment_lines(lineptr)
@@ -483,7 +467,7 @@ class Paramfile(object):
                 elif  options[j] == "-rt":
                     self.im_raytraced = True
         else:
-            if verbose: print "could not read in command line options from MCFOST; using default grid settings"
+            if verbose: print("could not read in command line options from MCFOST; using default grid settings")
 
         #--- Derived quantities ---
 
@@ -522,7 +506,7 @@ class Paramfile(object):
         return self.density_zones[0]['dust'][0]
 
     def __str__(self):
-        """ Return a nicely formatted text parameter file. Currently returns v2.17 format
+        """ Return a nicely formatted text parameter file. Currently returns v3.0 format
 
         HISTORY
         --------
@@ -531,6 +515,7 @@ class Paramfile(object):
         2014-01-12 Updated to version 2.19
         2015-06-15 Updated to version 2.20
         2016-08-15 Updates to version 3.0
+        2018-10-09 Updated for multiple grain components and DHS
 
         """
         #par = self._dict
@@ -549,6 +534,7 @@ class Paramfile(object):
         # see http://mail.scipy.org/pipermail/numpy-discussion/2013-June/066796.html
         def recarray2dict(somerecarray):
             mydict = {}
+            #print somerecarray.dtype.names
             for name, typecode in somerecarray.dtype.descr:
                 cast = float if 'f' in typecode else str
                 mydict[name] = cast(somerecarray[name])
@@ -567,7 +553,7 @@ class Paramfile(object):
   {self.nbr_photons_image:<10.5g}              nbr_photons_image : images computation
 
 #Wavelength
-  {self.nwavelengths:<3d} {self.lambda_min:<5.1f} {self.lambda_max:<7g}       n_lambda, lambda_min, lambda_max [microns]
+  {self.nwavelengths:<3d} {self.lambda_min:<5.2f} {self.lambda_max:<7g}       n_lambda, lambda_min, lambda_max [microns]
   {str_l_temp:1s} {str_l_sed:1s} {str_l_sed_complete:1s}                   compute temperature?, compute sed?, use default wavelength grid ?
   {self.wavelengths_file}           wavelength file (if previous parameter is F)
   {str_l_separate:1s} {str_l_stokes:1s}                     separation of different contributions?, stokes parameters?
@@ -578,7 +564,8 @@ class Paramfile(object):
 
 #Maps
   {self.im_nx:<3d} {self.im_ny:3d} {self.im_map_size:5.1f}        grid (nx,ny), size [AU]
-  {self.RT_imin:<4.1f}  {self.RT_imax:<4.1f}  {self.RT_n_incl:>2d} {str_RT_centered}    RT: imin, imax, n_incl, centered ?
+  {self.RT_imin:<4.2f}  {self.RT_imax:<4.2f}  {self.RT_n_incl:>2d} {str_RT_centered}    RT: imin, imax, n_incl, centered ?
+  {self.RT_az_min:<4.1f}  {self.RT_az_max:<4.1f}  {self.RT_n_az:>2d}    RT: az_min, az_max, n_az
   {self.distance:<6.2f}                 distance (pc)
   {self.disk_pa:<6.2f}                  disk PA
   """.format(self=self,
@@ -622,41 +609,46 @@ class Paramfile(object):
           str_viscous_heating=bstr(self.l_viscous_heating),
           )
 
-        if self.nzones > 1:
-            raise NotImplemented("write par file code does not yet support multiple zones!")
+        # if self.nzones > 1:
+        #     raise NotImplementedError("write par file code does not yet support multiple zones!")
 
-        getsubkeys = lambda k, l: tuple([par[k][li] for li in l])
-        template+="""
-#Density structure
+        #getsubkeys = lambda k, l: tuple([par[k][li] for li in l])
+        template += "\n#Density structure"
+        for zone in range(self.nzones): 
+            template+="""
   {zone[zone_type]:1d}                       zone type : 1 = disk, 2 = tapered-edge disk, 3 = envelope, 4 = debris disk, 5 = wall
   {zone[dust_mass]:<10.2e} {zone[gas_to_dust_ratio]:<5.1f}        dust mass,  gas-to-dust mass ratio
-  {zone[scale_height]:<5.1f}  {zone[reference_radius]:<6.1f} {zone[debris_disk_vertical_profile_exponent]:<6.1f}          scale height, reference radius (AU), unused for envelope, vertical profile exponent (only for debris disk)
+  {zone[scale_height]:<5.2f}  {zone[reference_radius]:<6.1f} {zone[debris_disk_vertical_profile_exponent]:<6.2f}          scale height, reference radius (AU), unused for envelope, vertical profile exponent (only for debris disk)
   {zone[r_in]:<6.1f}  {zone[edge]:<6.1f} {zone[r_out]:<6.1f} {zone[r_critical]:<6.1f}  Rin, edge, Rout, Rc (AU) Rc is only used for tappered-edge & debris disks (Rout set to 8*Rc if Rout==0)
   {zone[flaring_exp]:<8.3f}                  flaring exponent, unused for envelope
   {zone[surface_density_exp]:<6.3f} {zone[gamma_exp]:<6.3f}                surface density exponent (or -gamma for tappered-edge disk or volume density for envelope), usually < 0, -gamma_exp (or alpha_in & alpha_out for debris disk)
-        """.format(zone = self.density_zones[0])
+        """.format(zone = self.density_zones[zone])
 
         if float(self.version) < 3.0:
-           template+="""
+            template+="""
 #Cavity : everything is empty above the surface
   {self.cavity_flag}                        cavity ?
   {self.cavity_height:<5.1f}  {self.cavity_ref_radius:<5.1f}             height, reference radius (AU)
   {self.cavity_flaring_exp:<5.1f}                    flaring exponent
-        """.format(self=self) #% getkeys(['cavity_flag', 'cavity_height', 'cavity_ref_radius', 'cavity_flaring_exp'])
-
-        if len(self.density_zones[0]['dust']) > 1: raise NotImplemented("No support for multi dust types yet")
+  """.format(self=self) #% getkeys(['cavity_flag', 'cavity_height', 'cavity_ref_radius', 'cavity_flaring_exp'])
+    
         template+="""
-#Grain properties
-  {zone[dust_nspecies]:<2d}                      Number of species""".format(zone=self.density_zones[0])
+#Grain properties"""
+        for zone in range(self.nzones):
+            template+="""
+  {zone[dust_nspecies]:<2d}                      Number of species""".format(zone=self.density_zones[zone])
+            for dn in range(len(self.density_zones[0]['dust'])):
+                template+="""
+  {dust[grain_type]:s} {dust[ncomponents]:<2d} {dust[mixing_rule]:<1d} {dust[porosity]:<5.3f} {dust[mass_fraction]:<5.4f} {dust[dust_vmax]:<5.3f}     Grain type (Mie or DHS), N_components, mixing rule (1 = EMT or 2 = coating),  porosity, mass fraction, Vmax (for DHS)
+  """.format(dust = self.density_zones[zone]['dust'][dn])
+                for component in self.density_zones[zone]['dust'][dn]['components']:
+                    template+="""{component[filename]:s}  {component[volume_fraction]:<4.1f}   Optical indices file, volume fraction
+  """.format(component=component)
+                    template+="""{dust[heating]:<2d}                      Heating method : 1 = RE + LTE, 2 = RE + NLTE, 3 = NRE
+  {dust[amin]:<6.3f} {dust[amax]:6.3f}  {dust[aexp]:4.3f} {dust[ngrains]:3d}   amin, amax, aexp, nbr_grains
+  """.format(dust = self.density_zones[zone]['dust'][dn])
 
-        template+="""
-  Mie {dust[ncomponents]:<2d} {dust[mixing_rule]:<1d} {dust[porosity]:<5.2f} {dust[mass_fraction]:<5.2f} 0.9     Grain type (Mie or DHS), N_components, mixing rule (1 = EMT or 2 = coating),  porosity, mass fraction, Vmax (for DHS)
-  {dust[filename]:s}  {dust[volume_fraction]:<4.1f}   Optical indices file, volume fraction
-  {dust[heating]:<2d}                      Heating method : 1 = RE + LTE, 2 = RE + NLTE, 3 = NRE
-  {dust[amin]:<6.3f} {dust[amax]:6.1f}  {dust[aexp]:4.1f} {dust[ngrains]:3d}   amin, amax, aexp, nbr_grains
-      """.format(dust = self.density_zones[0]['dust'][0])
-
-        template+="""
+            template+="""
 #Molecular RT settings
   {str_lpop}  {str_lacpop}  {str_lte} {self.molecular_profile_width:f}              lpop, laccurate_pop, LTE, profile width
   {self.molecular_v_turb}                    v_turb (delta)
@@ -685,9 +677,8 @@ class Paramfile(object):
         return template
 
 
-    def writeto(self, outname='sample.par'):
-        """ Write an MCFOST parameter file to disk. Currently outputs v2.17 param files
-
+    def writeto(self, outname='sample.par', verbose=False):
+        """ Write an MCFOST parameter file to disk. Currently outputs v3.0 param files
 
         WARNING: Not all parameters are allowed to vary, just the most useful ones.
         Lots of the basics are still hard coded.
@@ -705,7 +696,8 @@ class Paramfile(object):
         outfile = open(outname, 'w')
         outfile.write( str(self))
         outfile.close()
-        print "  ==>> "+outname
+        if verbose: print("  ==>> "+outname)
+
 
     def set_parameter(self, paramname, value):
         """ Helper function for parameter setting.
@@ -737,12 +729,16 @@ class Paramfile(object):
             self.density_zones[0]['r_in'] = value
         elif paramname == 'r_out':
             self.density_zones[0]['r_out'] = value
+        elif paramname == 'r_critical':
+            self.density_zones[0]['r_critical'] = value
         elif paramname == 'flaring':
             self.density_zones[0]['flaring_exp'] = value
         elif paramname == 'surface_density':
             self.density_zones[0]['surface_density_exp'] = value
         elif paramname == 'gamma_exp':
             self.density_zones[0]['gamma_exp']=value
+        elif paramname == 'debris_disk_vertical_profile_exponent' or paramname == 'vertical_profile_exponent':
+            self.density_zones[0]['debris_disk_vertical_profile_exponent'] = value
         elif paramname == 'scaleheight' or paramname == 'scale_height':
             self.density_zones[0]['scale_height'] = value
         elif paramname == 'zone_type':
@@ -761,11 +757,14 @@ class Paramfile(object):
             self.density_zones[0]['dust'][0]['filename'] = value
         elif paramname == 'dust_porosity':
             self.density_zones[0]['dust'][0]['porosity'] = value
+        elif paramname == 'dust_vmax':
+            self.density_zones[0]['dust'][0]['dust_vmax'] = value
         else:
             try:
                 self[paramname] = value
             except:
                 raise ValueError("Don't know how to set a parameter named '{0}'".format(paramname))
+
 
 def find_paramfile(directory="./",  parfile=None, verbose=False, wavelength=None):
     """ Find a MCFOST par file in a specified directory
